@@ -1,0 +1,27 @@
+[package]
+name = "kalman"
+version = "0.1.0"
+edition = "2024"
+
+
+[dependencies]
+nalgebra = "0.34.0"
+thiserror = "2.0.16"
+rand = "0.9.2"
+dear-imgui-rs = "0.7.1"
+dear-app = "0.7.0"
+dear-implot = "0.7.0"
+dear-implot3d = { version = "0.7.0", optional = true }
+wgpu = "*"
+
+
+[features]
+# Extension features - use simple names to avoid conflicts
+implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
+
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
