@@ -5,19 +5,22 @@ edition = "2024"
 
 
 [dependencies]
-nalgebra = "0.34.0"
 thiserror = "2.0.16"
-rand = "0.9.2"
+nalgebra = "0.34.0"
+clap = { version = "4.5.53", features = ["derive"] }
 dear-imgui-rs = "0.7.1"
 dear-app = "0.7.0"
-dear-implot = "0.7.0"
+dear-implot = { version = "0.7.0", optional = true }
+
 dear-implot3d = { version = "0.7.0", optional = true }
 wgpu = "*"
 
+color-print = "0.3.7"
 
 [features]
-# Extension features - use simple names to avoid conflicts
+default = ["implot", "implot3d"]
 implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
+implot = ["dep:dear-implot", "dear-app/implot"]
 
 
 [profile.release]

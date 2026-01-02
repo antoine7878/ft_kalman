@@ -10,45 +10,43 @@
 #                                                                              #
 # **************************************************************************** #
 
-NAME = ./target/release/kalman
-SRC = ./src/client.rs   ./src/kalman.rs ./src/client.rs ./src/main.rs ./src/orchestrator.rs ./src/types.rs ./src/kalman_view.rs
-IMU= ./imu-sensor-stream-macos
-FEATURES = --features "implot3d"
+TYPE = debug
+
+NAME = ./target/$(TYPE)/kalman
+SRC =	./src/client.rs \
+		./src/kalman.rs \
+		./src/client.rs \
+		./src/main.rs \
+		./src/orchestrator.rs \
+		./src/types.rs \
+		./src/log.rs \
+		./src/gui.rs \
+		./src/message.rs \
+		./src/lib.rs \
+		./src/plot_data.rs
+
+IMU= ./imu-sensor-stream-linux
 
 all: $(NAME)
 
 $(NAME): $(SRC)
-	cargo build --release $(FEATURES)
-
-run:
-	cargo run $(FEATURES)
+	cargo build
 
 test: all
-	$(IMU) --filterspeed -d 15 &
-	sleep 0.1 && ./target/release/kalman
+	$(IMU) --filterspeed &
+	sleep 0.1 && ./target/$(TYPE)/kalman -v
 
-loop: all
-	@failures=0; \
-	for i in $$(seq 1 20); do \
-	    make loop-test; \
-	    exit_code=$$?; \
-	    if [ $$exit_code -ne 0 ]; then \
-	        failures=$$((failures + 1)); \
-	    fi; \
-	done; \
-	echo "Command failed $$failures time(s)."
+test-gui: all
+	# $(IMU) --filterspeed -s 4 -d 5 -n 2.7 & # show scatter
+	# $(IMU) --filterspeed -s 2 -n 2.4 & # high delta
+	$(IMU) --filterspeed  &
+	sleep 0.1 && ./target/$(TYPE)/kalman --gui
 
-loop-test:
-	$(IMU) -d 1 &
-	sleep 0.1 && ./target/release/kalman
 
 fix:
-	cargo fix --bin "kalman" -p kalman $(FEATURES)
+	cargo fix --bin "kalman" -p kalman
 
 help:
 	$(IMU) -h
-
-re:
-	cargo build --release
 
 .PHONY: all build test loop

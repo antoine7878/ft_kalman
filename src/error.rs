@@ -4,7 +4,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum KalmanError {
-    #[error("IO error: {0}")]
+    #[error("Communication error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Message too long: {0}")]
     MessageTooLong(usize),
@@ -14,8 +14,8 @@ pub enum KalmanError {
     FloatParsing(#[from] ParseFloatError),
     #[error("fmt error: {0}")]
     Fmt(#[from] FmtError),
-    #[error("Parsing error")]
-    Parsing,
+    #[error("Parsing error: {0}")]
+    Parsing(String),
     #[error("Inversion error")]
     Inversion(String),
 }

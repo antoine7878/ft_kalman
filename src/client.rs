@@ -1,4 +1,5 @@
 use crate::error::KalmanError;
+use crate::message::Message;
 use crate::types::T;
 use std::fmt::Write;
 use std::net::UdpSocket;
@@ -24,13 +25,12 @@ impl Client {
     }
 
     pub fn start(&mut self) -> Result<(), KalmanError> {
-        self.socket
-            .set_read_timeout(Some(Duration::from_millis(500)))?;
+        self.socket.set_read_timeout(Some(Duration::from_secs(1)))?;
         self.socket.send_to(b"READY", self.server)?;
         loop {
             println!("Connection ...");
             match self.recv_into_buf() {
-                Ok("Trajectory Generated!\nSending Info. . .\n") => break,
+                Ok(Message::Generation) => break,
                 Ok(msg) => println!("Received: {}", msg),
                 Err(_) => continue,
             }
@@ -39,17 +39,17 @@ impl Client {
         Ok(())
     }
 
-    pub fn recv_into_buf(&mut self) -> Result<&str, KalmanError> {
+    pub fn recv_into_buf(&mut self) -> Result<Message, KalmanError> {
         match self.socket.recv_from(&mut self.buf) {
             Ok((len, _)) if len >= MAX_LEN => Err(KalmanError::MessageTooLong(len)),
-            Ok((len, _)) => Ok(str::from_utf8(&self.buf[..len])?),
+            Ok((len, _)) => Message::try_from(str::from_utf8(&self.buf[..len])?),
             Err(e) => Err(KalmanError::Io(e)),
         }
     }
 
-    pub fn send_position(&self, x: T, y: T, z: T) -> Result<(), KalmanError> {
+    pub fn send_position(&self, pos: &[T]) -> Result<(), KalmanError> {
         let mut msg = String::with_capacity(64);
-        write!(&mut msg, "{} {} {}", x, y, z)?;
+        write!(&mut msg, "{} {} {}", pos[0], pos[1], pos[2])?;
         self.socket.send_to(msg.as_bytes(), self.server)?;
         Ok(())
     }

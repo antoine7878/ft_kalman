@@ -1,111 +1,117 @@
-use crate::error::KalmanError;
-use crate::types::{T, Vector3};
-use nalgebra::vector;
+use std::sync::{Arc, Mutex};
+use std::thread::sleep;
+use std::time::Duration;
 
 use crate::client::Client;
+use crate::error::KalmanError;
 use crate::kalman::Kalman;
-use crate::kalman_view::KalmanView;
+use crate::log::{log_filer_pos, log_in_message};
+use crate::message::Message;
+use crate::plot_data::PlotData;
+use crate::types::T;
 
-pub struct Orchestrator<V>
-where
-    V: KalmanView,
-{
+pub struct Orchestrator {
     client: Client,
     filter: Kalman,
-    view: V,
+    plot_data: Option<Arc<Mutex<PlotData>>>,
+    throttle: u64,
+    verbose: bool,
+    follow: bool,
 }
 
-enum Step {
-    Break,
-    Continue,
-}
-
-impl<V> Orchestrator<V>
-where
-    V: KalmanView,
-{
-    pub fn new(server_addr: &'static str, logger: V) -> Result<Orchestrator<V>, KalmanError> {
+impl Orchestrator {
+    pub fn new(
+        server_addr: &'static str,
+        plot_data: Option<Arc<Mutex<PlotData>>>,
+        throttle: u64,
+        verbose: bool,
+        follow: bool,
+    ) -> Result<Orchestrator, KalmanError> {
         Ok(Orchestrator {
             client: Client::new(server_addr)?,
             filter: Kalman::new(),
-            view: logger,
+            plot_data,
+            throttle,
+            verbose,
+            follow,
         })
     }
 
-    pub fn start(&mut self) -> Result<(), KalmanError> {
-        self.client.start()
-    }
-
     pub fn run(&mut self) -> Result<(), KalmanError> {
+        self.client.start()?;
         self.process_init_msg()?;
-        self.view.start();
         loop {
-            match self.step()? {
-                Step::Break => break,
-                Step::Continue => continue,
+            let message = self.client.recv_into_buf()?;
+            if self.verbose {
+                log_in_message(&message);
             }
+            match &message {
+                Message::End => self.send_pos()?,
+                Message::Goodbye => break,
+                Message::TruePosition(pos) | Message::Position(pos) => {
+                    self.update_plot_data(Some(pos.as_slice()));
+                    self.filter.correction(pos)?;
+                }
+                Message::Acceleration(acc) => {
+                    self.filter.prediction(acc)?;
+                    if self.follow {
+                        self.update_plot_data(None);
+                    }
+                }
+                Message::Direction(_)
+                | Message::Start
+                | Message::Speed(_)
+                | Message::Generation => continue,
+            };
         }
-        self.view.end();
+        self.set_done();
         Ok(())
     }
-
-    fn step(&mut self) -> Result<Step, KalmanError> {
-        match self.client.recv_into_buf()?.to_string().as_str() {
-            "MSG_START" => Ok(Step::Continue),
-            "MSG_END" => {
-                self.send_pos()?;
-                Ok(Step::Continue)
-            }
-            "GOODBYE." => Ok(Step::Break),
-            message => {
-                self.handle_message(message)?;
-                Ok(Step::Continue)
-            }
-        }
-    }
-
-    fn handle_message(&mut self, message: &str) -> Result<(), KalmanError> {
-        match Self::vec_of_iter(message)? {
-            ("POSITION", pos) => {
-                self.view.print_message(message);
-                self.filter.correction(pos)
-            }
-            ("ACCELERATION", acc) => self.filter.prediction(acc),
-            _ => Ok(()),
-        }
-    }
-
     fn process_init_msg(&mut self) -> Result<(), KalmanError> {
         let _start = self.client.recv_into_buf()?;
-        let (_, pos) = Self::vec_of_iter(self.client.recv_into_buf()?)?;
-        let (_, speed) = Self::scal_of_iter(self.client.recv_into_buf()?)?;
-        let _ = self.client.recv_into_buf()?;
-        let (_, dir) = Self::vec_of_iter(self.client.recv_into_buf()?)?;
+        let pos = self.client.recv_into_buf()?;
+        let speed = self.client.recv_into_buf()?;
+        let _acc = self.client.recv_into_buf()?;
+        let dir = self.client.recv_into_buf()?;
         let _end = self.client.recv_into_buf()?;
-        self.filter.init(pos, speed, dir);
-        self.send_pos()
-    }
 
-    fn vec_of_iter(message: &str) -> Result<(&str, Vector3), KalmanError> {
-        let mut it = message.split_at(14).1.split('\n');
-        match (it.next(), it.next(), it.next(), it.next()) {
-            (Some(a), Some(x), Some(y), Some(z)) => Ok((
-                a,
-                vector![x.parse::<T>()?, y.parse::<T>()?, z.parse::<T>()?],
-            )),
-            _ => Err(KalmanError::Parsing),
+        match (pos, speed, dir) {
+            (Message::TruePosition(pos), Message::Speed(speed), Message::Direction(dir)) => {
+                self.filter.init(pos, speed, dir);
+                self.send_pos()
+            }
+            _ => Err(KalmanError::Parsing("Bad inital messsage".into())),
         }
     }
 
-    fn scal_of_iter(message: &str) -> Result<(&str, T), KalmanError> {
-        let mut it = message.split_at(14).1.split('\n');
-        match (it.next(), it.next()) {
-            (Some(a), Some(x)) => Ok((a, x.parse::<T>()?)),
-            _ => Err(KalmanError::Parsing),
-        }
-    }
     fn send_pos(&mut self) -> Result<(), KalmanError> {
-        let x = self.filter.get_pos();
-        self.client.send_position(x.x, x.y, x.z)
+        sleep(Duration::from_micros(self.throttle));
+        let a = self.filter.get_state();
+        if self.verbose {
+            log_filer_pos(a);
+        }
+        self.client.send_position(a)
+    }
+
+    fn update_plot_data(&self, gps: Option<&[T]>) {
+        if let Some(plot_data) = &self.plot_data
+            && let Ok(mut plot_data) = plot_data.lock()
+        {
+            plot_data.push(
+                self.filter.get_state(),
+                self.filter.get_state_variance(),
+                self.filter.get_innovation(),
+                gps,
+                self.filter.get_nis(),
+            );
+        };
+    }
+
+    fn set_done(&self) {
+        if let Some(plot_data) = &self.plot_data
+            && let Ok(mut plot_data) = plot_data.lock()
+        {
+            plot_data.done = true;
+        }
     }
 }
