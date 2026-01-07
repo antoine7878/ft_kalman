@@ -10,8 +10,6 @@
 #                                                                              #
 # **************************************************************************** #
 
-TYPE = debug
-
 NAME = ./target/$(TYPE)/kalman
 SRC =	./src/client.rs \
 		./src/kalman.rs \
@@ -25,22 +23,22 @@ SRC =	./src/client.rs \
 		./src/lib.rs \
 		./src/plot_data.rs
 
-IMU= ./imu-sensor-stream-linux
+IMU= ./imu-sensor-stream-macos
 
 all: $(NAME)
 
 $(NAME): $(SRC)
-	cargo build
+	cargo build --release
 
 test: all
 	$(IMU) --filterspeed &
-	sleep 0.1 && ./target/$(TYPE)/kalman -v
+	sleep 0.1 && ./target/release/kalman
 
 test-gui: all
 	# $(IMU) --filterspeed -s 4 -d 5 -n 2.7 & # show scatter
 	# $(IMU) --filterspeed -s 2 -n 2.4 & # high delta
 	$(IMU) --filterspeed  &
-	sleep 0.1 && ./target/$(TYPE)/kalman --gui
+	sleep 0.1 && ./target/release/kalman --gui
 
 
 fix:
